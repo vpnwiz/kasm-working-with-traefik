@@ -1,0 +1,36 @@
+version: '3.7'
+
+services:
+  traefik:
+    image: traefik:2.9
+    container_name: traefik
+    restart: always
+
+    networks:
+      - traefiknet
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /docker/traefik/acme:/acme
+      - /docker/traefik/logs:/logs
+      - /docker/traefik/config:/etc/traefik # autoloads traefik.yaml on start
+      - /docker/traefik/credentials:/credentials:ro
+
+    environment:
+      - CF_API_EMAIL=<email>
+      - CF_API_KEY=<key>
+
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.traefik.rule=Host(`yourdomain.com`)
+      - traefik.http.routers.traefik.tls=true
+      - traefik.http.routers.traefik.tls.certresolver=le
+      - traefik.http.routers.traefik.tls.domains[0].main=yourdomain.com
+      - traefik.http.routers.traefik.tls.domains[0].sans=*.yourdomain.com
+
+networks:
+  traefiknet:
+    external: true

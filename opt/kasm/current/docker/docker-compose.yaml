@@ -1,0 +1,200 @@
+#####
+##### Your existing Kasm compose file should be the same until the
+##### kasm_proxy section at the bottom. 
+#####
+version: '3'
+
+services:
+
+  db:
+    container_name: kasm_db
+    image: postgres:12-alpine
+    healthcheck:
+      test: "pg_isready --username=kasmapp && cat /proc/1/cmdline | grep -q '^postgres'"
+      timeout: 5s
+      retries: 20
+    networks:
+      - kasm_default_network
+    environment:
+      POSTGRES_PASSWORD: "secret"
+      POSTGRES_USER: kasmapp
+      POSTGRES_DB: kasm
+    volumes:
+      - /opt/kasm/1.13.0/conf/database/data.sql:/docker-entrypoint-initdb.d/data.sql
+      - /opt/kasm/1.13.0/conf/database/pg_hba.conf:/var/lib/postgresql/conf/pg_hba.conf
+      - /opt/kasm/1.13.0/conf/database/postgresql.conf:/var/lib/postgresql/conf/postgresql.conf
+      - /opt/kasm/1.13.0/conf/database/:/tmp/
+      - /opt/kasm/1.13.0/certs/db_server.crt:/etc/ssl/certs/db_server.crt
+      - /opt/kasm/1.13.0/certs/db_server.key:/etc/ssl/certs/db_server.key
+      - /opt/kasm/1.13.0/log/postgres/:/var/log/postgres/
+      - kasm_db_1.13.0:/var/lib/postgresql/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
+    command: postgres -c ssl=on -c ssl_cert_file=/etc/ssl/certs/db_server.crt -c ssl_key_file=/etc/ssl/certs/db_server.key -c config_file=/var/lib/postgresql/conf/postgresql.conf -c hba_file=/var/lib/postgresql/conf/pg_hba.conf
+    restart: "always"
+
+
+  kasm_redis:
+    container_name: kasm_redis
+    command: ["sh", "-c", "redis-server --requirepass $${REDIS_PASSWORD}"]
+    user: "${KASM_UID?}:${KASM_GID?}"
+    image: redis:5-alpine
+    networks:
+      - kasm_default_network
+    environment:
+      REDIS_PASSWORD: "secret"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
+    restart: "always"
+
+
+  kasm_api:
+    container_name: kasm_api
+    user: "${KASM_UID?}:${KASM_GID?}"
+    image: "kasmweb/api:1.13.0"
+    read_only: true
+    networks:
+      - kasm_default_network
+    volumes:
+      - /opt/kasm/1.13.0:/opt/kasm/current
+      - /opt/kasm/1.13.0/tmp/api:/tmp
+    depends_on:
+      - db
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
+
+
+  kasm_manager:
+    container_name: kasm_manager
+    user: "${KASM_UID?}:${KASM_GID?}"
+    image: "kasmweb/manager:1.13.0"
+    read_only: true
+    networks:
+      - kasm_default_network
+    volumes:
+      - /opt/kasm/1.13.0:/opt/kasm/current
+    depends_on:
+      - db
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
+
+
+  kasm_agent:
+    container_name: kasm_agent
+    user: root
+    image: "kasmweb/agent:1.13.0"
+    read_only: true
+    networks:
+      - kasm_default_network
+    volumes:
+      - /opt/kasm/1.13.0:/opt/kasm/current
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker
+      - /opt/kasm/1.13.0/conf/nginx:/etc/nginx/conf.d
+    depends_on:
+      - kasm_manager
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
+
+
+  kasm_share:
+    container_name: kasm_share
+    user: root
+    image: "kasmweb/share:1.13.0"
+    read_only: true
+    networks:
+      - kasm_default_network
+    volumes:
+      - /opt/kasm/1.13.0:/opt/kasm/current
+    restart: always
+    depends_on:
+      - db
+      - kasm_redis
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
+
+
+  kasm_guac:
+    container_name: kasm_guac
+    user: "${KASM_UID?}:${KASM_GID?}"
+    image: "kasmweb/kasm-guac:1.13.0"
+    read_only: true
+    networks:
+      - kasm_default_network
+    volumes:
+      - /opt/kasm/1.13.0:/opt/kasm/current
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
+
+##### Copy from here to the bottom into your Kasm docker-compose, overwriting
+##### what's already in there. Make sure the indents are the same.
+
+  proxy:
+    container_name: kasm_proxy
+    image: "kasmweb/nginx:latest"
+    ports:
+      - "8443:8443"
+    expose:
+      - "443"
+    networks:
+      - kasm_default_network
+      - <YOUR TRAEFIK NETWORK>
+    volumes:
+      - /docker/kasm/nginx.conf:/etc/nginx/nginx.conf
+      - /opt/kasm/1.13.0/conf/nginx:/etc/nginx/conf.d:ro
+      - /opt/kasm/1.13.0/certs/kasm_nginx.key:/etc/ssl/private/kasm_nginx.key
+      - /opt/kasm/1.13.0/certs/kasm_nginx.crt:/etc/ssl/certs/kasm_nginx.crt
+      - /opt/kasm/1.13.0/www:/srv/www:ro
+      - /opt/kasm/1.13.0/log/nginx:/var/log/external/nginx/
+      - /opt/kasm/1.13.0/log/logrotate:/var/log/external/logrotate/
+    depends_on:
+      - kasm_manager
+      - kasm_api
+      - kasm_agent
+      - kasm_share
+      - kasm_guac
+    labels:
+      - traefik.enable=true
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
+
+
+volumes:
+  kasm_db_1.13.0:
+    external: true
+
+networks:
+  kasm_default_network:
+    external: true
+  <YOUR TRAEFIK NETWORK>:
+    external: true
+##### Copy to here #####

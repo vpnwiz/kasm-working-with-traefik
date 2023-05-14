@@ -1,0 +1,19 @@
+### DYNAMIC CONFIG FILE
+http:
+
+  routers:
+    rtr_kasm:
+      entrypoints:
+        - websecure
+      service: svc_kasm
+      rule: "Host(`kasm.yourdomain.com`)"
+      tls:
+        certresolver: le
+
+  middlewares:
+
+  services:
+    svc_kasm:
+      loadBalancer:
+        servers:
+          - url: https://kasm_proxy:443
